@@ -27,7 +27,7 @@ select,input[type=text]{font-size:13px;padding:6px 10px;border:1px solid #ddd;bo
 .col-count{font-size:12px;color:#aaa;background:#f5f4f0;border-radius:999px;padding:2px 8px}
 .card{background:#fff;border:1px solid #e5e3dc;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:border-color .15s}
 .card:hover{border-color:#bbb}
-.card-proj{font-size:11px;font-weight:500;padding:2px 7px;border-radius:999px;display:inline-block;margin-bottom:5px}
+.card-proj{font-size:11px;font-weight:500;padding:2px 8px;border-radius:999px;display:inline-block;margin-bottom:5px}
 .card-title{font-size:13px;color:#1a1a1a;line-height:1.45;margin-bottom:5px}
 .card-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .card-from{font-size:11px;color:#aaa}
@@ -52,10 +52,9 @@ select,input[type=text]{font-size:13px;padding:6px 10px;border:1px solid #ddd;bo
   <div class="logo">GISMO <span>Board</span></div>
   <div class="filters">
     <select id="fProj"><option value="">Всі проекти</option></select>
-    <select id="fDir"><option value="">Всі напрямки</option><option>Дизайн</option><option>Будівництво</option><option>Меблі</option></select>
-    <input type="text" id="fSearch" placeholder="Пошук..." style="width:130px">
+    <input type="text" id="fSearch" placeholder="Пошук..." style="width:140px">
   </div>
-  <button class="btn" onclick="loadSheet()">↻ Оновити</button>
+  <button class="btn" onclick="loadSheet()">↻</button>
   <button class="btn btn-primary" onclick="openAdd()">+ Завдання</button>
   <span class="sync loading" id="sync">Завантаження...</span>
 </div>
@@ -65,7 +64,7 @@ select,input[type=text]{font-size:13px;padding:6px 10px;border:1px solid #ddd;bo
 
 <script>
 const SHEET_ID = '1p-ZpJcskUH1aDQYw6cWqEn0jtcr05-A1lJdXadqWbLo';
-const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Sheet1`;
+const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Arkusz1`;
 
 const COLS = [
   {id:'new',  label:'Нові завдання'},
@@ -74,50 +73,82 @@ const COLS = [
   {id:'done', label:'Готово'}
 ];
 
-const DIR_COLORS = {
-  'Дизайн':      {bg:'#E6F1FB', c:'#185FA5'},
-  'Будівництво': {bg:'#EAF3DE', c:'#3B6D11'},
-  'Меблі':       {bg:'#FAEEDA', c:'#854F0B'},
-};
-
-const PROJECTS = [
-  {id:'p1', name:'Квартира Левандовська', dir:'Дизайн'},
-  {id:'p2', name:'Будинок Стрий',         dir:'Будівництво'},
-  {id:'p3', name:'Вітальня Краків',        dir:'Меблі'},
+// Палітра кольорів для автоматичного призначення проектам
+const PALETTE = [
+  {bg:'#E6F1FB', c:'#185FA5'},
+  {bg:'#EAF3DE', c:'#3B6D11'},
+  {bg:'#FAEEDA', c:'#854F0B'},
+  {bg:'#EEEDFE', c:'#3C3489'},
+  {bg:'#E1F5EE', c:'#085041'},
+  {bg:'#FBEAF0', c:'#72243E'},
+  {bg:'#FAECE7', c:'#712B13'},
+  {bg:'#F1EFE8', c:'#444441'},
 ];
 
 let tasks = [];
+let projColors = {}; // автоматично призначені кольори
 let editId = null;
+let paletteIndex = 0;
+
+function getColor(projName) {
+  if (!projName) return {bg:'#F1EFE8', c:'#444441'};
+  if (!projColors[projName]) {
+    projColors[projName] = PALETTE[paletteIndex % PALETTE.length];
+    paletteIndex++;
+  }
+  return projColors[projName];
+}
+
+function cleanTitle(text) {
+  if (!text) return '';
+  return text
+    .replace(/@taras_gismo_bot/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 async function loadSheet() {
   setSyncStatus('loading', 'Оновлення...');
   try {
-    const r = await fetch(SHEET_URL + '&t=' + Date.now());
-    const text = await r.text();
-    const match = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/);
-    if (!match) throw new Error('Bad response');
-    const json = JSON.parse(match[1]);
-    const rows = json.table?.rows || [];
+    // Спробуємо обидві можливі назви аркуша
+    let data = await fetchSheet('Arkusz1');
+    if (!data) data = await fetchSheet('Sheet1');
+    if (!data) data = await fetchSheet('Аркуш1');
+    if (!data) throw new Error('Sheet not found');
 
+    const rows = data.table?.rows || [];
     tasks = rows
       .filter(row => row.c && row.c[2] && row.c[2].v)
       .map(row => ({
         id:       cell(row.c[0]) || 't' + Math.random().toString(36).slice(2),
-        proj:     cell(row.c[1]) || 'p1',
-        title:    cell(row.c[2]),
+        proj:     cell(row.c[1]) || '—',
+        title:    cleanTitle(cell(row.c[2])),
         col:      cell(row.c[3]) || 'new',
         priority: cell(row.c[4]) || 'mid',
         date:     cell(row.c[5]) || '',
         from:     cell(row.c[6]) || '',
-      }));
+      }))
+      .filter(t => t.title); // прибрати порожні після очищення
 
     setSyncStatus('ok', 'Оновлено ' + now());
     updateProjFilter();
     render();
   } catch(e) {
     setSyncStatus('err', 'Не вдалось зчитати Sheets');
-    if (!tasks.length) loadDemo();
   }
+}
+
+async function fetchSheet(sheetName) {
+  try {
+    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&t=${Date.now()}`;
+    const r = await fetch(url);
+    const text = await r.text();
+    const match = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/);
+    if (!match) return null;
+    const json = JSON.parse(match[1]);
+    if (!json.table?.rows?.length) return null;
+    return json;
+  } catch { return null; }
 }
 
 function cell(c) {
@@ -128,18 +159,6 @@ function now() {
   return new Date().toLocaleTimeString('uk-UA', {hour:'2-digit', minute:'2-digit'});
 }
 
-function loadDemo() {
-  tasks = [
-    {id:'t1', proj:'p1', title:'Підготувати 3D візуалізацію вітальні', col:'wip',  priority:'high', date:'2025-04-18', from:'Олена'},
-    {id:'t2', proj:'p1', title:'Затвердити колірну палітру',           col:'new',  priority:'mid',  date:'',           from:'Марек'},
-    {id:'t3', proj:'p2', title:'Перевірити кошторис підрядника',       col:'hold', priority:'high', date:'2025-04-20', from:'бот'},
-    {id:'t4', proj:'p3', title:'Замовити зразки тканини',              col:'new',  priority:'low',  date:'',           from:'бот'},
-  ];
-  setSyncStatus('err', 'Демо-дані (Sheets недоступний)');
-  updateProjFilter();
-  render();
-}
-
 function setSyncStatus(type, text) {
   const el = document.getElementById('sync');
   el.className = 'sync ' + type;
@@ -148,7 +167,6 @@ function setSyncStatus(type, text) {
 
 function render() {
   const fp = document.getElementById('fProj').value;
-  const fd = document.getElementById('fDir').value;
   const fs = (document.getElementById('fSearch').value || '').toLowerCase();
   const board = document.getElementById('board');
   board.innerHTML = '';
@@ -156,11 +174,11 @@ function render() {
   COLS.forEach(col => {
     let list = tasks.filter(t => t.col === col.id);
     if (fp) list = list.filter(t => t.proj === fp);
-    if (fd) list = list.filter(t => {
-      const p = PROJECTS.find(x => x.id === t.proj || x.name === t.proj);
-      return p && p.dir === fd;
-    });
-    if (fs) list = list.filter(t => t.title.toLowerCase().includes(fs) || t.from.toLowerCase().includes(fs));
+    if (fs) list = list.filter(t =>
+      t.title.toLowerCase().includes(fs) ||
+      t.proj.toLowerCase().includes(fs) ||
+      t.from.toLowerCase().includes(fs)
+    );
 
     const div = document.createElement('div');
     div.className = 'col';
@@ -168,13 +186,12 @@ function render() {
     if (!list.length) div.innerHTML += `<div class="empty">Порожньо</div>`;
 
     list.forEach(t => {
-      const p = PROJECTS.find(x => x.id === t.proj || x.name === t.proj) || {name: t.proj || '—', dir: 'Дизайн'};
-      const dc = DIR_COLORS[p.dir] || {bg:'#F1EFE8', c:'#5F5E5A'};
+      const dc = getColor(t.proj);
       const pc = t.priority === 'high' ? 'p-high' : t.priority === 'low' ? 'p-low' : 'p-mid';
       const card = document.createElement('div');
       card.className = 'card';
       card.innerHTML = `
-        <span class="card-proj" style="background:${dc.bg};color:${dc.c}">${p.name}</span>
+        <span class="card-proj" style="background:${dc.bg};color:${dc.c}">${t.proj}</span>
         <div class="card-title">${t.title}</div>
         <div class="card-meta">
           <span class="dot ${pc}"></span>
@@ -192,23 +209,31 @@ function render() {
 function updateProjFilter() {
   const sel = document.getElementById('fProj');
   const cur = sel.value;
+  const projs = [...new Set(tasks.map(t => t.proj).filter(Boolean))].sort();
   sel.innerHTML = '<option value="">Всі проекти</option>';
-  PROJECTS.forEach(p => sel.innerHTML += `<option value="${p.id}">${p.name}</option>`);
+  projs.forEach(p => {
+    getColor(p); // ініціалізувати колір
+    sel.innerHTML += `<option value="${p}">${p}</option>`;
+  });
   sel.value = cur;
 }
 
-function openAdd()    { editId = null; showModal({proj:'p1', title:'', col:'new', priority:'mid', date:''}); }
-function openEdit(id) { editId = id;   const t = tasks.find(x => x.id === id); if(t) showModal({...t}); }
+function openAdd()    { editId = null; showModal({proj:'', title:'', col:'new', priority:'mid', date:''}); }
+function openEdit(id) { editId = id; const t = tasks.find(x => x.id === id); if(t) showModal({...t}); }
 
 function showModal(t) {
   const modal = document.getElementById('modal');
   modal.style.display = 'flex';
-  const projOpts = PROJECTS.map(p => `<option value="${p.id}"${p.id===t.proj?' selected':''}>${p.name}</option>`).join('');
+  const projs = [...new Set(tasks.map(x => x.proj).filter(Boolean))].sort();
+  const projOpts = projs.map(p => `<option value="${p}"${p===t.proj?' selected':''}>${p}</option>`).join('');
   const colOpts  = COLS.map(c => `<option value="${c.id}"${c.id===t.col?' selected':''}>${c.label}</option>`).join('');
   modal.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()">
   <div class="modal">
     <h2>${editId ? 'Редагувати завдання' : 'Нове завдання'}</h2>
-    <div class="field"><label>Проект</label><select id="m_proj">${projOpts}</select></div>
+    <div class="field"><label>Проект / група</label>
+      <input type="text" id="m_proj" value="${t.proj||''}" placeholder="Назва групи..." list="proj_list">
+      <datalist id="proj_list">${projOpts}</datalist>
+    </div>
     <div class="field"><label>Завдання</label><input type="text" id="m_title" value="${t.title||''}" placeholder="Опис завдання..."></div>
     <div class="field"><label>Колонка</label><select id="m_col">${colOpts}</select></div>
     <div class="field"><label>Пріоритет</label><select id="m_pri">
@@ -221,7 +246,7 @@ function showModal(t) {
       ${editId ? `<button class="btn-danger" onclick="deleteTask()">Видалити</button>` : `<span></span>`}
       <div style="display:flex;gap:8px">
         <button class="btn" onclick="closeModal()">Скасувати</button>
-        <button class="btn btn-primary" onclick="saveTaskLocal()">Зберегти</button>
+        <button class="btn btn-primary" onclick="saveTask()">Зберегти</button>
       </div>
     </div>
   </div></div>`;
@@ -229,12 +254,12 @@ function showModal(t) {
 
 function closeModal() { document.getElementById('modal').style.display = 'none'; }
 
-function saveTaskLocal() {
+function saveTask() {
   const title = document.getElementById('m_title').value.trim();
   if (!title) return;
   const t = {
     id:       editId || 't' + Date.now(),
-    proj:     document.getElementById('m_proj').value,
+    proj:     document.getElementById('m_proj').value.trim(),
     title,
     col:      document.getElementById('m_col').value,
     priority: document.getElementById('m_pri').value,
@@ -245,6 +270,7 @@ function saveTaskLocal() {
   else        tasks.push(t);
   closeModal();
   render();
+  updateProjFilter();
 }
 
 function deleteTask() {
@@ -255,7 +281,6 @@ function deleteTask() {
 }
 
 document.getElementById('fProj').addEventListener('change', render);
-document.getElementById('fDir').addEventListener('change', render);
 document.getElementById('fSearch').addEventListener('input', render);
 
 loadSheet();
