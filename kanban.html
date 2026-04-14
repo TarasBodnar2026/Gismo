@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GISMO Board</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F5F4F0;color:#1a1a1a;min-height:100vh}
+.topbar{background:#fff;border-bottom:1px solid #e5e3dc;padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;top:0;z-index:10}
+.logo{font-size:16px;font-weight:600;letter-spacing:0.04em;white-space:nowrap}
+.logo span{font-weight:300;color:#888}
+.filters{display:flex;gap:8px;flex:1;flex-wrap:wrap}
+select,input[type=text]{font-size:13px;padding:6px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;color:#1a1a1a;outline:none}
+.btn{font-size:13px;padding:6px 14px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer;white-space:nowrap}
+.btn:hover{background:#f5f5f5}
+.btn-primary{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+.btn-primary:hover{background:#333}
+.sync{font-size:12px;color:#aaa;margin-left:auto;white-space:nowrap}
+.sync.ok{color:#639922}.sync.err{color:#E24B4A}.sync.loading{color:#EF9F27}
+.board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;padding:16px 20px;align-items:start}
+@media(max-width:860px){.board{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:480px){.board{grid-template-columns:1fr}}
+.col{background:#fff;border-radius:12px;border:1px solid #e5e3dc;padding:12px}
+.col-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.col-title{font-size:13px;font-weight:500;color:#555}
+.col-count{font-size:12px;color:#aaa;background:#f5f4f0;border-radius:999px;padding:2px 8px}
+.card{background:#fff;border:1px solid #e5e3dc;border-radius:8px;padding:10px 12px;margin-bottom:8px;transition:border-color .15s}
+.card:hover{border-color:#bbb}
+.card-proj{font-size:11px;font-weight:500;padding:2px 8px;border-radius:999px;display:inline-block;margin-bottom:5px}
+.card-title{font-size:13px;color:#1a1a1a;line-height:1.45;margin-bottom:6px}
+.card-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.card-from{font-size:11px;color:#aaa}
+.card-date{font-size:11px;color:#aaa}
+.dot{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0}
+.p-high{background:#E24B4A}.p-mid{background:#EF9F27}.p-low{background:#639922}
+.card-actions{display:flex;gap:4px;flex-wrap:wrap}
+.status-btn{font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid #e5e3dc;background:#f5f4f0;color:#555;cursor:pointer;transition:all .15s}
+.status-btn:hover{background:#e5e3dc}
+.status-btn.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+.status-btn.done-btn{border-color:#639922;color:#3B6D11}
+.status-btn.done-btn:hover{background:#EAF3DE}
+.empty{text-align:center;padding:20px 8px;color:#ccc;font-size:12px}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal{background:#fff;border-radius:14px;padding:24px;width:min(460px,95vw);max-height:90vh;overflow-y:auto}
+.modal h2{font-size:16px;font-weight:600;margin-bottom:16px}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;color:#888;margin-bottom:4px}
+.field input,.field select{width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;font-family:inherit;outline:none;background:#fff;color:#1a1a1a}
+.modal-actions{display:flex;justify-content:space-between;align-items:center;margin-top:16px}
+.btn-danger{font-size:13px;padding:6px 14px;border:1px solid #E24B4A;border-radius:8px;background:transparent;color:#E24B4A;cursor:pointer}
+.btn-danger:hover{background:#FCEBEB}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;z-index:200;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">GISMO <span>Board</span></div>
+  <div class="filters">
+    <select id="fProj"><option value="">Всі проекти</option></select>
+    <input type="text" id="fSearch" placeholder="Пошук..." style="width:130px">
+  </div>
+  <button class="btn" onclick="loadTasks()">↻</button>
+  <button class="btn btn-primary" onclick="openAdd()">+ Завдання</button>
+  <span class="sync loading" id="sync">Завантаження...</span>
+</div>
+
+<div class="board" id="board"></div>
+<div id="modal" style="display:none"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API = 'https://script.google.com/macros/s/AKfycbwdpUQkok9ZPFpTeQ0HdAip5UO14FXNrWq4dRF36Hfa40HJ1BlLTWF3UOYTSxorJB7L/exec';
+
+const COLS = [
+  {id:'new',  label:'Нові завдання'},
+  {id:'wip',  label:'В роботі'},
+  {id:'hold', label:'На паузі / Чекаю'},
+  {id:'done', label:'Готово'}
+];
+
+const STATUS_BTNS = [
+  {col:'wip',  label:'В роботі'},
+  {col:'hold', label:'Пауза'},
+  {col:'done', label:'✓ Готово', cls:'done-btn'},
+];
+
+const PALETTE = [
+  {bg:'#E6F1FB',c:'#185FA5'},{bg:'#EAF3DE',c:'#3B6D11'},
+  {bg:'#FAEEDA',c:'#854F0B'},{bg:'#EEEDFE',c:'#3C3489'},
+  {bg:'#E1F5EE',c:'#085041'},{bg:'#FBEAF0',c:'#72243E'},
+  {bg:'#FAECE7',c:'#712B13'},{bg:'#F1EFE8',c:'#444441'},
+];
+
+let tasks = [];
+let projColors = {};
+let paletteIdx = 0;
+let editId = null;
+
+function getColor(name) {
+  if (!name) return {bg:'#F1EFE8',c:'#444441'};
+  if (!projColors[name]) projColors[name] = PALETTE[paletteIdx++ % PALETTE.length];
+  return projColors[name];
+}
+
+async function loadTasks() {
+  setSyncStatus('loading', 'Оновлення...');
+  try {
+    const r = await fetch(API + '?action=getTasks&t=' + Date.now());
+    const data = await r.json();
+    if (data.tasks) {
+      tasks = data.tasks;
+      setSyncStatus('ok', 'Оновлено ' + now());
+      updateProjFilter();
+      render();
+    } else throw new Error();
+  } catch {
+    setSyncStatus('err', 'Помилка підключення');
+  }
+}
+
+async function updateStatus(id, col) {
+  setSyncStatus('loading', 'Зберігається...');
+  try {
+    const r = await fetch(API, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain'},
+      body: JSON.stringify({action: 'updateStatus', id, col})
+    });
+    const data = await r.json();
+    if (data.ok) {
+      tasks = tasks.map(t => t.id === id ? {...t, col} : t);
+      setSyncStatus('ok', 'Збережено ' + now());
+      render();
+      if (col === 'done') showToast('✅ Виконано! Сповіщення відправлено в чат');
+    }
+  } catch {
+    setSyncStatus('err', 'Помилка збереження');
+  }
+}
+
+function render() {
+  const fp = document.getElementById('fProj').value;
+  const fs = (document.getElementById('fSearch').value || '').toLowerCase();
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+
+  COLS.forEach(col => {
+    let list = tasks.filter(t => t.col === col.id);
+    if (fp) list = list.filter(t => t.proj === fp);
+    if (fs) list = list.filter(t => t.title.toLowerCase().includes(fs) || (t.proj||'').toLowerCase().includes(fs));
+
+    // Сортування по пріоритету
+    const order = {high:0, mid:1, low:2};
+    list.sort((a,b) => (order[a.priority]||1) - (order[b.priority]||1));
+
+    const div = document.createElement('div');
+    div.className = 'col';
+    div.innerHTML = `<div class="col-header"><span class="col-title">${col.label}</span><span class="col-count">${list.length}</span></div>`;
+    if (!list.length) div.innerHTML += `<div class="empty">Порожньо</div>`;
+
+    list.forEach(t => {
+      const dc = getColor(t.proj);
+      const pc = t.priority==='high'?'p-high':t.priority==='low'?'p-low':'p-mid';
+
+      // Кнопки статусу — не показувати поточний статус
+      const btns = STATUS_BTNS.filter(b => b.col !== t.col)
+        .map(b => `<button class="status-btn ${b.cls||''}" onclick="event.stopPropagation();changeStatus('${t.id}','${b.col}')">${b.label}</button>`)
+        .join('');
+
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+        <span class="card-proj" style="background:${dc.bg};color:${dc.c}">${t.proj||'—'}</span>
+        <div class="card-title">${t.title}</div>
+        <div class="card-meta">
+          <span class="dot ${pc}"></span>
+          ${t.from?`<span class="card-from">від ${t.from}</span>`:''}
+          ${t.date?`<span class="card-date">${t.date}</span>`:''}
+        </div>
+        <div class="card-actions">${btns}</div>`;
+      div.appendChild(card);
+    });
+
+    board.appendChild(div);
+  });
+}
+
+function changeStatus(id, col) {
+  updateStatus(id, col);
+}
+
+function updateProjFilter() {
+  const sel = document.getElementById('fProj');
+  const cur = sel.value;
+  const projs = [...new Set(tasks.map(t => t.proj).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">Всі проекти</option>';
+  projs.forEach(p => { getColor(p); sel.innerHTML += `<option value="${p}">${p}</option>`; });
+  sel.value = cur;
+}
+
+function openAdd() { editId = null; showModal({proj:'',title:'',col:'new',priority:'mid',date:''}); }
+
+function showModal(t) {
+  const modal = document.getElementById('modal');
+  modal.style.display = 'flex';
+  const projs = [...new Set(tasks.map(x=>x.proj).filter(Boolean))].sort();
+  const colOpts = COLS.map(c=>`<option value="${c.id}"${c.id===t.col?' selected':''}>${c.label}</option>`).join('');
+  modal.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <h2>Нове завдання</h2>
+    <div class="field"><label>Проект</label>
+      <input type="text" id="m_proj" value="${t.proj||''}" placeholder="Назва групи..." list="proj_list">
+      <datalist id="proj_list">${projs.map(p=>`<option value="${p}">`).join('')}</datalist>
+    </div>
+    <div class="field"><label>Завдання</label><input type="text" id="m_title" value="${t.title||''}" placeholder="Опис завдання..."></div>
+    <div class="field"><label>Колонка</label><select id="m_col">${colOpts}</select></div>
+    <div class="field"><label>Пріоритет</label><select id="m_pri">
+      <option value="high"${t.priority==='high'?' selected':''}>🔴 Високий</option>
+      <option value="mid"${t.priority==='mid'?' selected':''}>🟡 Середній</option>
+      <option value="low"${t.priority==='low'?' selected':''}>🟢 Низький</option>
+    </select></div>
+    <div class="field"><label>Дедлайн</label><input type="date" id="m_date" value="${t.date||''}"></div>
+    <div class="modal-actions">
+      <span></span>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="closeModal()">Скасувати</button>
+        <button class="btn btn-primary" onclick="saveTask()">Зберегти</button>
+      </div>
+    </div>
+  </div></div>`;
+}
+
+function closeModal() { document.getElementById('modal').style.display='none'; }
+
+function saveTask() {
+  const title = document.getElementById('m_title').value.trim();
+  if (!title) return;
+  const t = {
+    id: 't'+Date.now(),
+    proj: document.getElementById('m_proj').value.trim(),
+    title,
+    col: document.getElementById('m_col').value,
+    priority: document.getElementById('m_pri').value,
+    date: document.getElementById('m_date').value,
+    from: 'Тарас',
+    chat_id: ''
+  };
+  tasks.push(t);
+  closeModal();
+  render();
+  showToast('Завдання додано');
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+function setSyncStatus(type, text) {
+  const el = document.getElementById('sync');
+  el.className = 'sync ' + type;
+  el.textContent = text;
+}
+
+function now() {
+  return new Date().toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'});
+}
+
+document.getElementById('fProj').addEventListener('change', render);
+document.getElementById('fSearch').addEventListener('input', render);
+
+loadTasks();
+setInterval(loadTasks, 30000);
+</script>
+</body>
+</html>
