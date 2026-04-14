@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GISMO Board</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F5F4F0;color:#1a1a1a;min-height:100vh}
+.topbar{background:#fff;border-bottom:1px solid #e5e3dc;padding:14px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;top:0;z-index:10}
+.logo{font-size:16px;font-weight:600;letter-spacing:0.04em;white-space:nowrap}
+.logo span{font-weight:300;color:#888}
+.filters{display:flex;gap:8px;flex:1;flex-wrap:wrap}
+select,input[type=text]{font-size:13px;padding:6px 10px;border:1px solid #ddd;border-radius:8px;background:#fff;color:#1a1a1a;outline:none}
+.btn{font-size:13px;padding:6px 14px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer;white-space:nowrap}
+.btn:hover{background:#f5f5f5}
+.btn-primary{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+.btn-primary:hover{background:#333}
+.sync{font-size:12px;color:#aaa;margin-left:auto;white-space:nowrap}
+.sync.ok{color:#639922}.sync.err{color:#E24B4A}.sync.loading{color:#EF9F27}
+.board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;padding:18px 20px;align-items:start}
+@media(max-width:860px){.board{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:480px){.board{grid-template-columns:1fr}}
+.col{background:#fff;border-radius:12px;border:1px solid #e5e3dc;padding:12px}
+.col-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.col-title{font-size:13px;font-weight:500;color:#555}
+.col-count{font-size:12px;color:#aaa;background:#f5f4f0;border-radius:999px;padding:2px 8px}
+.card{background:#fff;border:1px solid #e5e3dc;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:border-color .15s}
+.card:hover{border-color:#bbb}
+.card-proj{font-size:11px;font-weight:500;padding:2px 7px;border-radius:999px;display:inline-block;margin-bottom:5px}
+.card-title{font-size:13px;color:#1a1a1a;line-height:1.45;margin-bottom:5px}
+.card-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.card-from{font-size:11px;color:#aaa}
+.card-date{font-size:11px;color:#aaa}
+.dot{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0}
+.p-high{background:#E24B4A}.p-mid{background:#EF9F27}.p-low{background:#639922}
+.empty{text-align:center;padding:20px 8px;color:#ccc;font-size:12px}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal{background:#fff;border-radius:14px;padding:24px;width:min(460px,95vw);max-height:90vh;overflow-y:auto}
+.modal h2{font-size:16px;font-weight:600;margin-bottom:16px}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;color:#888;margin-bottom:4px}
+.field input,.field select{width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;font-family:inherit;outline:none;background:#fff;color:#1a1a1a}
+.modal-actions{display:flex;justify-content:space-between;align-items:center;margin-top:16px}
+.btn-danger{font-size:13px;padding:6px 14px;border:1px solid #E24B4A;border-radius:8px;background:transparent;color:#E24B4A;cursor:pointer}
+.btn-danger:hover{background:#FCEBEB}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">GISMO <span>Board</span></div>
+  <div class="filters">
+    <select id="fProj"><option value="">Всі проекти</option></select>
+    <select id="fDir"><option value="">Всі напрямки</option><option>Дизайн</option><option>Будівництво</option><option>Меблі</option></select>
+    <input type="text" id="fSearch" placeholder="Пошук..." style="width:130px">
+  </div>
+  <button class="btn" onclick="loadSheet()">↻ Оновити</button>
+  <button class="btn btn-primary" onclick="openAdd()">+ Завдання</button>
+  <span class="sync loading" id="sync">Завантаження...</span>
+</div>
+
+<div class="board" id="board"></div>
+<div id="modal" style="display:none"></div>
+
+<script>
+const SHEET_ID = '1p-ZpJcskUH1aDQYw6cWqEn0jtcr05-A1lJdXadqWbLo';
+const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Sheet1`;
+
+const COLS = [
+  {id:'new',  label:'Нові завдання'},
+  {id:'wip',  label:'В роботі'},
+  {id:'hold', label:'На паузі / Чекаю'},
+  {id:'done', label:'Готово'}
+];
+
+const DIR_COLORS = {
+  'Дизайн':      {bg:'#E6F1FB', c:'#185FA5'},
+  'Будівництво': {bg:'#EAF3DE', c:'#3B6D11'},
+  'Меблі':       {bg:'#FAEEDA', c:'#854F0B'},
+};
+
+const PROJECTS = [
+  {id:'p1', name:'Квартира Левандовська', dir:'Дизайн'},
+  {id:'p2', name:'Будинок Стрий',         dir:'Будівництво'},
+  {id:'p3', name:'Вітальня Краків',        dir:'Меблі'},
+];
+
+let tasks = [];
+let editId = null;
+
+async function loadSheet() {
+  setSyncStatus('loading', 'Оновлення...');
+  try {
+    const r = await fetch(SHEET_URL + '&t=' + Date.now());
+    const text = await r.text();
+    const match = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/);
+    if (!match) throw new Error('Bad response');
+    const json = JSON.parse(match[1]);
+    const rows = json.table?.rows || [];
+
+    tasks = rows
+      .filter(row => row.c && row.c[2] && row.c[2].v)
+      .map(row => ({
+        id:       cell(row.c[0]) || 't' + Math.random().toString(36).slice(2),
+        proj:     cell(row.c[1]) || 'p1',
+        title:    cell(row.c[2]),
+        col:      cell(row.c[3]) || 'new',
+        priority: cell(row.c[4]) || 'mid',
+        date:     cell(row.c[5]) || '',
+        from:     cell(row.c[6]) || '',
+      }));
+
+    setSyncStatus('ok', 'Оновлено ' + now());
+    updateProjFilter();
+    render();
+  } catch(e) {
+    setSyncStatus('err', 'Не вдалось зчитати Sheets');
+    if (!tasks.length) loadDemo();
+  }
+}
+
+function cell(c) {
+  return c && c.v !== null && c.v !== undefined ? String(c.v).trim() : '';
+}
+
+function now() {
+  return new Date().toLocaleTimeString('uk-UA', {hour:'2-digit', minute:'2-digit'});
+}
+
+function loadDemo() {
+  tasks = [
+    {id:'t1', proj:'p1', title:'Підготувати 3D візуалізацію вітальні', col:'wip',  priority:'high', date:'2025-04-18', from:'Олена'},
+    {id:'t2', proj:'p1', title:'Затвердити колірну палітру',           col:'new',  priority:'mid',  date:'',           from:'Марек'},
+    {id:'t3', proj:'p2', title:'Перевірити кошторис підрядника',       col:'hold', priority:'high', date:'2025-04-20', from:'бот'},
+    {id:'t4', proj:'p3', title:'Замовити зразки тканини',              col:'new',  priority:'low',  date:'',           from:'бот'},
+  ];
+  setSyncStatus('err', 'Демо-дані (Sheets недоступний)');
+  updateProjFilter();
+  render();
+}
+
+function setSyncStatus(type, text) {
+  const el = document.getElementById('sync');
+  el.className = 'sync ' + type;
+  el.textContent = text;
+}
+
+function render() {
+  const fp = document.getElementById('fProj').value;
+  const fd = document.getElementById('fDir').value;
+  const fs = (document.getElementById('fSearch').value || '').toLowerCase();
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+
+  COLS.forEach(col => {
+    let list = tasks.filter(t => t.col === col.id);
+    if (fp) list = list.filter(t => t.proj === fp);
+    if (fd) list = list.filter(t => {
+      const p = PROJECTS.find(x => x.id === t.proj || x.name === t.proj);
+      return p && p.dir === fd;
+    });
+    if (fs) list = list.filter(t => t.title.toLowerCase().includes(fs) || t.from.toLowerCase().includes(fs));
+
+    const div = document.createElement('div');
+    div.className = 'col';
+    div.innerHTML = `<div class="col-header"><span class="col-title">${col.label}</span><span class="col-count">${list.length}</span></div>`;
+    if (!list.length) div.innerHTML += `<div class="empty">Порожньо</div>`;
+
+    list.forEach(t => {
+      const p = PROJECTS.find(x => x.id === t.proj || x.name === t.proj) || {name: t.proj || '—', dir: 'Дизайн'};
+      const dc = DIR_COLORS[p.dir] || {bg:'#F1EFE8', c:'#5F5E5A'};
+      const pc = t.priority === 'high' ? 'p-high' : t.priority === 'low' ? 'p-low' : 'p-mid';
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+        <span class="card-proj" style="background:${dc.bg};color:${dc.c}">${p.name}</span>
+        <div class="card-title">${t.title}</div>
+        <div class="card-meta">
+          <span class="dot ${pc}"></span>
+          ${t.from ? `<span class="card-from">від ${t.from}</span>` : ''}
+          ${t.date ? `<span class="card-date">${t.date}</span>` : ''}
+        </div>`;
+      card.onclick = () => openEdit(t.id);
+      div.appendChild(card);
+    });
+
+    board.appendChild(div);
+  });
+}
+
+function updateProjFilter() {
+  const sel = document.getElementById('fProj');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Всі проекти</option>';
+  PROJECTS.forEach(p => sel.innerHTML += `<option value="${p.id}">${p.name}</option>`);
+  sel.value = cur;
+}
+
+function openAdd()    { editId = null; showModal({proj:'p1', title:'', col:'new', priority:'mid', date:''}); }
+function openEdit(id) { editId = id;   const t = tasks.find(x => x.id === id); if(t) showModal({...t}); }
+
+function showModal(t) {
+  const modal = document.getElementById('modal');
+  modal.style.display = 'flex';
+  const projOpts = PROJECTS.map(p => `<option value="${p.id}"${p.id===t.proj?' selected':''}>${p.name}</option>`).join('');
+  const colOpts  = COLS.map(c => `<option value="${c.id}"${c.id===t.col?' selected':''}>${c.label}</option>`).join('');
+  modal.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <h2>${editId ? 'Редагувати завдання' : 'Нове завдання'}</h2>
+    <div class="field"><label>Проект</label><select id="m_proj">${projOpts}</select></div>
+    <div class="field"><label>Завдання</label><input type="text" id="m_title" value="${t.title||''}" placeholder="Опис завдання..."></div>
+    <div class="field"><label>Колонка</label><select id="m_col">${colOpts}</select></div>
+    <div class="field"><label>Пріоритет</label><select id="m_pri">
+      <option value="high"${t.priority==='high'?' selected':''}>🔴 Високий</option>
+      <option value="mid"${t.priority==='mid'?' selected':''}>🟡 Середній</option>
+      <option value="low"${t.priority==='low'?' selected':''}>🟢 Низький</option>
+    </select></div>
+    <div class="field"><label>Дедлайн</label><input type="date" id="m_date" value="${t.date||''}"></div>
+    <div class="modal-actions">
+      ${editId ? `<button class="btn-danger" onclick="deleteTask()">Видалити</button>` : `<span></span>`}
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="closeModal()">Скасувати</button>
+        <button class="btn btn-primary" onclick="saveTaskLocal()">Зберегти</button>
+      </div>
+    </div>
+  </div></div>`;
+}
+
+function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+function saveTaskLocal() {
+  const title = document.getElementById('m_title').value.trim();
+  if (!title) return;
+  const t = {
+    id:       editId || 't' + Date.now(),
+    proj:     document.getElementById('m_proj').value,
+    title,
+    col:      document.getElementById('m_col').value,
+    priority: document.getElementById('m_pri').value,
+    date:     document.getElementById('m_date').value,
+    from:     'Тарас'
+  };
+  if (editId) tasks = tasks.map(x => x.id === editId ? t : x);
+  else        tasks.push(t);
+  closeModal();
+  render();
+}
+
+function deleteTask() {
+  if (!editId) return;
+  tasks = tasks.filter(x => x.id !== editId);
+  closeModal();
+  render();
+}
+
+document.getElementById('fProj').addEventListener('change', render);
+document.getElementById('fDir').addEventListener('change', render);
+document.getElementById('fSearch').addEventListener('input', render);
+
+loadSheet();
+setInterval(loadSheet, 30000);
+</script>
+</body>
+</html>
